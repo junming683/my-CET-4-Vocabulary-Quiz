@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>四级听力特训 (V7.2)</title>
+    <title>四级暴力听力 (V7.3)</title>
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -37,7 +37,7 @@
             const [options, setOptions] = React.useState([]);
             const [status, setStatus] = React.useState('idle'); 
 
-            // --- 进度读取 ---
+            // --- 进度存取 ---
             React.useEffect(() => {
                 const l = localStorage.getItem('cet4_learned_v7');
                 const m = localStorage.getItem('cet4_mistakes_v7');
@@ -52,30 +52,50 @@
                 localStorage.setItem('cet4_mistakes_v7', JSON.stringify(newM));
             };
 
-            // --- V7.2 音频核心逻辑 ---
+            // --- V7.3 暴力音频核心 ---
+            
+            // 1. 初始化引擎 (解锁)
+            const unlockAudio = () => {
+                // 播放一个空的音频片段，欺骗浏览器解锁音频上下文
+                window.speechSynthesis.cancel();
+                const u = new SpeechSynthesisUtterance(''); 
+                u.volume = 0; 
+                window.speechSynthesis.speak(u);
+                // 专门针对iOS的唤醒
+                if (window.speechSynthesis.resume) {
+                    window.speechSynthesis.resume();
+                }
+            };
+
+            // 2. 朗读函数
             const speak = React.useCallback((txt) => {
                 if (!txt) return;
                 
-                // 1. 强制重置
+                // 强制重置，防止队列卡死
                 window.speechSynthesis.cancel();
                 
+                // 再次尝试唤醒 (针对iOS)
+                if (window.speechSynthesis.resume) {
+                    window.speechSynthesis.resume();
+                }
+
                 const u = new SpeechSynthesisUtterance(txt);
-                u.lang = 'en-US'; // 强制美式英语
+                u.lang = 'en-US'; 
                 u.rate = 1.0; 
                 u.volume = 1.0;
-
-                // 2. 尝试寻找更优质的英文语音包 (解决部分安卓机发音奇怪的问题)
+                
+                // 优先使用 Google 或 Apple 的本地语音包
                 const voices = window.speechSynthesis.getVoices();
-                const enVoice = voices.find(v => v.lang === 'en-US' && !v.localService) || voices.find(v => v.lang.includes('en'));
-                if (enVoice) u.voice = enVoice;
+                const bestVoice = voices.find(v => v.lang === 'en-US' && !v.localService) || voices.find(v => v.lang.includes('en'));
+                if (bestVoice) u.voice = bestVoice;
 
                 window.speechSynthesis.speak(u);
             }, []);
 
-            // 监听题目变化，自动播放 (比 setTimeout 更稳)
+            // 3. 自动播放监听器
             React.useEffect(() => {
                 if (view === 'quiz' && sessionWords[currentIndex]) {
-                    // 稍微延迟 50ms 确保 DOM 渲染完毕，避免被浏览器卡掉
+                    // 使用 setTimeout 分离执行栈，尝试绕过某些浏览器限制
                     const timer = setTimeout(() => {
                         speak(sessionWords[currentIndex].word);
                     }, 50);
@@ -86,6 +106,9 @@
 
             // --- 流程控制 ---
             const startSession = (mode) => {
+                // [关键步骤] 在用户点击开始的一瞬间，解锁音频
+                unlockAudio();
+
                 const isModeMistake = mode === 'mistakes';
                 const source = isModeMistake 
                     ? FULL_DB.filter(w => mistakes.includes(w.word))
@@ -117,7 +140,7 @@
                 const opts = [...dists, word].sort(() => Math.random() - 0.5);
                 setOptions(opts);
                 setStatus('idle');
-                // 注意：这里不再直接调用 speak，而是交给上面的 useEffect 自动触发
+                // 朗读交给 useEffect 处理
             };
 
             const handleAnswer = (def) => {
@@ -139,7 +162,7 @@
                 }
                 saveProgress(newL, newM);
 
-                // 为了防止“不跳转”的问题，这里使用较短的延迟
+                // 答错多看一会 (1.5s)，答对快点走 (0.6s)
                 const delay = isCorrect ? 600 : 1500; 
 
                 setTimeout(() => {
@@ -159,13 +182,14 @@
                 return (
                     <div className="glass rounded-xl p-6 shadow-2xl w-full max-h-[90vh] overflow-y-auto">
                         <div className="text-center mb-6">
-                            <h1 className="text-2xl font-bold text-white mb-1">CET-4 听力加强版</h1>
+                            <h1 className="text-2xl font-bold text-white mb-1">CET-4 暴力听力</h1>
                             <div className="text-xs text-gray-400">词库: {FULL_DB.length} | 已斩: {learned.length} | 错题: {mistakes.length}</div>
                         </div>
                         <div className="bg-gray-700 h-3 rounded-full mb-8 overflow-hidden">
                             <div className="bg-blue-500 h-full transition-all duration-500" style={{width: p + '%'}}></div>
                         </div>
                         <div className="space-y-4">
+                            {/* 开始按钮 */}
                             <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
                                 <div className="flex justify-between items-center mb-3">
                                     <span className="text-gray-300 font-bold">新词学习</span>
@@ -174,7 +198,9 @@
                                 <button onClick={() => startSession('normal')} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg btn">
                                     开始 (Start)
                                 </button>
+                                <div className="text-center mt-2 text-[10px] text-gray-500">点击“开始”将解锁自动发音</div>
                             </div>
+
                             <div className="bg-red-900/20 p-4 rounded-lg border border-red-900/30">
                                 <button onClick={() => startSession('mistakes')} disabled={mistakes.length===0} className={`w-full font-bold py-3 rounded-lg btn ${mistakes.length>0 ? 'bg-red-600 text-white' : 'bg-gray-700 text-gray-500'}`}>
                                     复习错题 ({mistakes.length})
@@ -197,9 +223,8 @@
 
                     <div className="text-center mb-6">
                         <h2 className="text-3xl font-black text-white mb-2 break-words">{cur.word}</h2>
-                        {/* 显眼的播放按钮，作为自动播放失败的后备方案 */}
                         <button onClick={() => speak(cur.word)} className="text-blue-400 text-sm border border-blue-900 bg-blue-900/20 px-4 py-2 rounded-full btn active:bg-blue-800">
-                             🔊 点我发音
+                             🔊 没声音点我
                         </button>
                     </div>
 
